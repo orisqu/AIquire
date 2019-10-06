@@ -6,7 +6,6 @@ import drawnow
 
 #### Logic and datastructures to maintain game state ####
 
-
 ## Data Structure for hotel chain
 class Chain:
 	def __init__(self, uid):
@@ -326,8 +325,9 @@ class Board:
 			liquidation_targets = list(set([el.value for el in existing_chains if el.value != winner]))
 			print liquidation_targets
 
-			# TODO allow stock transfers/keeps
+			# TODO allow AI to perform stock transfers/keeps
 			## INSERT AI CHOICE HERE: Keep stocks or sell? ##
+
 			# Liquidate players' shares in acquired companies
 			for lt in liquidation_targets:
 				first, second = board.chains[lt].getBonuses()
@@ -404,12 +404,9 @@ class Board:
 
 		return available_stocks
 
-
-## TODO create an AI class and give them hooks into
-##      anything commented "INSERT AI CHOICE HERE"
 ## Data structure to maintain game state for a player
 class Player:
-	def __init__(self, uid, board):
+	def __init__(self, uid, board, ai):
 		self.uid = uid
 		self.cash = 6000
 
@@ -426,6 +423,10 @@ class Player:
 
 		# Key: Chain UID, Value: # of shares
 		self.stocks = {1:0, 2:0, 3:0, 4:0, 5:0, 6:0}
+
+		# Initialize an AI for this player
+		# Note that ai is passed as a class pointer
+		self.ai = ai(self)
 
 	# Return list of all tiles this player is allowed to play
 	def getValidPlays(self):
@@ -466,22 +467,106 @@ class Player:
 
 		return total
 
-	# TODO Who should regulate that the stock purchases are legal?
+	# TODO Enforce stock purchases are legal
+	# Who should regulate that the stock purchases are legal?
 	# I want to abstract that away from the AIs if possible
 	# Trigger the purchase of a stock for this player
 	def purchaseStocks(self):
 		available_stocks = self.board.getAvailableStocks()
 
 		## INSERT AI CHOICE HERE: Stock purchase selection ##
-		# For now, just purchase a random amount of a random chain
-		purchase_number = int(1.5+random.random()*1.49)
-		purchase_uid    = int(1+random.random()*5.1)
+		purchase_number, purchase_uid = self.ai.chooseStockPurchase()
 
 		price_per_share = self.board.chains[purchase_uid].getPrice()
 
+		# Only execute sale if cash on hand is sufficient
 		if purchase_number*price_per_share <= self.cash:
 			self.cash -= purchase_number*price_per_share
 			self.stocks[purchase_uid] += purchase_number
+
+#### AI specific logic ####
+
+## A valid AI must have policies for making each of these choices
+# I have not thought through whether polymorphism is a good model for this
+# For now, let this class be a template, and overwrite each of these methods.
+# Search for INSERT AI CHOICE HERE for hook locations
+class AI:
+	def __init__(self, player):
+		self.player = player
+
+	# Not currently hooked into game logic :(
+	def chooseMergePref(self):
+		pass
+
+	# Not currently hooked into game logic :(
+	def chooseKeepOrSell(self):
+		pass
+
+	# Not currently hooked into game logic :(
+	def chooseLuxPref(self):
+		pass
+
+	def chooseStockPurchase(self):
+		purchase_number = 0
+		purchase_uid = 1
+		return purchase_number, purchase_uid
+
+	def choosePlayTile(self, possible_tiles):
+		return possible_tiles[0]
+
+## This guy is insane. He makes decisions via dart boards
+class RandBot(AI):
+	# Roll them dice!!
+	def chooseStockPurchase(self):
+		purchase_number = int(1.5+random.random()*1.49)
+		purchase_uid    = int(1+random.random()*5.1)
+		return purchase_number, purchase_uid
+
+	# Crazy RandBot strikes again! Throw a tile down.
+	def choosePlayTile(self, possible_tiles):
+		chosen_play = random.choice(possible_tiles)
+		return chosen_play
+
+
+## Randomly plays tiles and hates spending money
+class FrugalBot(AI):
+	# Can't spend money to make money.
+	def chooseStockPurchase(self):
+		print "FrugBot making a decision"
+		return 0, 1
+
+	# I barely understand this game.
+	def choosePlayTile(self, possible_tiles):
+		chosen_play = random.choice(possible_tiles)
+		return chosen_play
+
+
+## Prefers the left side of the board
+class LeftBot(AI):
+	# I don't care what I buy.
+	def chooseStockPurchase(self):
+		print "LeftBot making a decision"
+		purchase_number = int(1.5+random.random()*1.49)
+		purchase_uid    = int(1+random.random()*5.1)
+		return purchase_number, purchase_uid
+
+	# Left is right! Right is wrong.
+	def choosePlayTile(self, possible_tiles):
+		chosen_play = sorted(possible_tiles, key=lambda tile: tile[0])[0]
+		return chosen_play
+
+## WorldWide is going World Wide!!!
+class BrandBot(AI):
+	# There is one strategy, and it is loyalty.
+	def chooseStockPurchase(self):
+		purchase_number = int(1+random.random()*2.)
+		purchase_uid    = 1
+		return purchase_number, purchase_uid
+
+	# I only play tiles so I can buy more stocks.
+	def choosePlayTile(self, possible_tiles):
+		chosen_play = random.choice(possible_tiles)
+		return chosen_play
 
 
 #### Run a simulation of the game! ####
@@ -548,10 +633,10 @@ def showBoard():
 
 
 # Initialize players
-p1 = Player(1, board)
-p2 = Player(2, board)
-p3 = Player(3, board)
-p4 = Player(4, board)
+p1 = Player(1, board,   RandBot)
+p2 = Player(2, board, FrugalBot)
+p3 = Player(3, board,   LeftBot)
+p4 = Player(4, board,  BrandBot)
 
 board.players.extend([p1,p2,p3,p4])
 
@@ -562,12 +647,13 @@ drawnow.figure(figsize=(13, 5))
 while not board.gameCompleted:
 	for player in board.players:
 		## Play tile
-		possible_tiles = player.getValidPlays()
-		if len(possible_tiles) >=1:
 
+		possible_tiles = player.getValidPlays()
+		# TODO: Provide tile replacement for dead tiles
+		if len(possible_tiles) >=1:
 			### INSERT AI CHOICE HERE: Which tile to play ###
-			# For now, choose the first valid tile
-			chosen_play = possible_tiles[0]
+			chosen_play = player.ai.choosePlayTile(possible_tiles)
+
 			player.tiles.remove(chosen_play)
 			board.playTile(player, chosen_play)
 
